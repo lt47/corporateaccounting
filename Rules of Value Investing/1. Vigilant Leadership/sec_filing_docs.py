@@ -100,7 +100,7 @@ class SecUrlExtract():
                         filing_doc = self.get_filing_doc(
                             filing_page, filing_type)
                         single_response.update(
-                            {'filing_type': filing_type, 'filing_detail_page': filing_page, 'statement_page': filing_doc, 'filing_date': filing_date})
+                            {'filing_type': filing_type, 'filing_detail_page': filing_page, 'statement_url': filing_doc, 'filing_date': filing_date})
                         sec_urls_response.append(single_response)
                     elif filing_type == '10-K' and len(sec_urls_response) > 0:
                         break
@@ -145,6 +145,6 @@ class SecUrlExtract():
         return filing_doc if filing_doc != '' else alt_filing_doc
 
 
-p = SecUrlExtract("ibm")
+# p = SecUrlExtract("ibm")
 # print(p.get_cik())
-print(p.get_filing_data('1994, 1995, 1996', '10-Q'))
+# print(p.get_filing_data('1994, 1995, 1996', '10-Q'))
