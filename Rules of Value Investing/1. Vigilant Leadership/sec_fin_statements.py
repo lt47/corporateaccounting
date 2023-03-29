@@ -6,6 +6,9 @@ import sec_filing_docs
 import logging
 from xbrl.cache import HttpCache
 from xbrl.instance import XbrlParser, XbrlInstance
+from datetime import datetime, timedelta
+import html2text
+
 
 # The purpose of this class is to get information from financial statements.
 
@@ -14,35 +17,83 @@ class SecFinData():
     def get_fin_statement(self, filings: json):
         # everything below will be part of an xbrl function. There will be an if statement to determine the func to use based on file type
         filings = json.loads(filings)
+
+        # decision making dict in place of if statement.
+        statement_actions = {True: self.parse_xbrl_statement,
+                             False: self.parse_html_txt_statement}
+
+        statements_response = list()
         # have to loop through filings response
         for i in range(len(filings)):
-            schema_url = filings[i]['statement_url'].replace('/ix?doc=/', '')
-            filing_date = filings[i]['filing_date']
-            # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
+            filing = filings[i]
+            xbrl_bool = '/ix?doc=/' in filing['statement_url']
+            statement_action = statement_actions.get(
+                xbrl_bool, self.parse_html_txt_statement)
 
-            cache: HttpCache = HttpCache('./cache')
+            single_response = statement_action(filing)
 
-            cache.set_headers({'From': 'laye@fort-seven.com',
-                               'User-Agent': 'py-xbrl/2.1.0'})
-            parser = XbrlParser(cache)
+            statements_response.append(single_response) if len(
+                single_response) > 0 else None
 
-            # schema_url = "https://www.sec.gov/Archives/edgar/data/51143/000155837022015322/ibm-20220930x10q.htm"
-            inst: XbrlInstance = parser.parse_instance(schema_url)
-            instjson = inst.json(override_fact_ids=True)
-            instjson = json.loads(instjson)
-            # inst.json('./test.json')
-            statements_response = list()
+        return statements_response
 
-            for j in range(len(instjson['facts'])):
-                single_statement_response = dict()
-                # need to import datetime module, convert date strings and find out if period is within 3 months of filing date
-                if instjson['facts'][f'f{j}']['dimensions']['concept'] == 'Liabilities' and filing_date in instjson['facts'][f'f{j}']['dimensions']['period']:
-                    single_statement_response.update(
-                        {'totalLiabilities': instjson['facts'][f'f{j}']['value'], 'filing_date': instjson['facts'][f'f{j}']['dimensions']['period']})
-                statements_response.append(single_statement_response) if len(
-                    single_statement_response) > 0 else None
+    def parse_xbrl_statement(self, filing):
+        single_statement_response = dict()
+        schema_url = filing['statement_url'].replace('/ix?doc=/', '')
+        filing_date = filing['filing_date']
+        filing_date = datetime.strptime(filing_date, '%Y-%m-%d')
+        # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
+
+        cache: HttpCache = HttpCache('./cache')
+
+        cache.set_headers({'From': 'laye@fort-seven.com',
+                           'User-Agent': 'py-xbrl/2.1.0'})
+        parser = XbrlParser(cache)
+
+        inst: XbrlInstance = parser.parse_instance(schema_url)
+        instjson = inst.json(override_fact_ids=True)
+        instjson = json.loads(instjson)
+        for j in range(len(instjson['facts'])):
+            resp_period = datetime.strptime(
+                instjson['facts'][f'f{j}']['dimensions']['period'].split('/')[0], '%Y-%m-%d')
+            # need to import datetime module, convert date strings and find out if period is within 3 months of filing date
+            if instjson['facts'][f'f{j}']['dimensions']['concept'] == 'Liabilities' and abs(filing_date-resp_period) <= timedelta(days=90):
+                single_statement_response.update(
+                    {'totalLiabilities': instjson['facts'][f'f{j}']['value'], 'filing_period': instjson['facts'][f'f{j}']['dimensions']['period']})
+
+        return single_statement_response
+
+    def parse_html_txt_statement(self, filing):
+        single_statement_response = dict()
+        schema_url = filing['statement_url'].replace('gov//', 'gov/')
+        filing_date = filing['filing_date']
+        filing_date = datetime.strptime(filing_date, '%Y-%m-%d')
+        # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
+
+        headers = {
+            'User-Agent': 'Fort Seven laye@fort-seven.com',
+            'Accept-Encoding': 'gzip, deflate',
+            'Host': 'www.sec.gov'
+        }
+        req = requests.get(schema_url, headers=headers).text
+        url_txt = html2text.html2text(req)
+
+        txt_json = dict()
+
+        for index, line in enumerate(url_txt.split('\n')):
+            command, description = line.strip().split(
+                None, 1) if len(line.strip().split(None, 1)) > 1 else [None, None]
+            txt_json[command] = description.strip(
+            ) if command != None else None
+
+        out_file = open('./testtxt.json', "w")
+        json.dump(txt_json, out_file, indent=4, sort_keys=False)
+        out_file.close()
+        pass
+
+        return single_statement_response
 
 
 extract_obj = sec_filing_docs.SecUrlExtract("ibm")
 p = SecFinData()
-p.get_fin_statement(extract_obj.get_filing_data('2021', '10-Q'))
+print(p.get_fin_statement(extract_obj.get_filing_data('2014', '10-Q')))
