@@ -20,7 +20,7 @@ class SecFinData():
 
         # decision making dict in place of if statement.
         statement_actions = {True: self.parse_xbrl_statement,
-                             False: self.parse_html_txt_statement}
+                             False: self.parse_txt_statement}
 
         statements_response = list()
         # have to loop through filings response
@@ -63,6 +63,34 @@ class SecFinData():
 
         return single_statement_response
 
+    def parse_txt_statement(self, filing):
+        single_statement_response = dict()
+        schema_url = filing['statement_url'].replace('gov//', 'gov/')
+        filing_date = filing['filing_date']
+        filing_date = datetime.strptime(filing_date, '%Y-%m-%d')
+        # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
+
+        headers = {
+            'User-Agent': 'Fort Seven laye@fort-seven.com',
+            'Accept-Encoding': 'gzip, deflate',
+            'Host': 'www.sec.gov'
+        }
+        data = requests.get(schema_url, headers=headers).text
+
+        currency_units = ['thousands', 'millions', 'billions']
+        for index, line in enumerate(data.split('\n')):
+            if 'Dollars in ' in line:
+                currency_unit = re.findall(
+                    r'Dollars in.*[n|d]s\b', line)[0].replace(')', '').split()[2].lower()
+            if 'Total liabilities' in line or 'Total Liabilities' in line:
+                # convert the total liabilities amount to an integer and convert it to currency unit
+                total_liabilities = re.findall(
+                    r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?!\d)', line)[0]
+
+                pass
+
+        return single_statement_response
+
     def parse_html_txt_statement(self, filing):
         single_statement_response = dict()
         schema_url = filing['statement_url'].replace('gov//', 'gov/')
@@ -96,4 +124,4 @@ class SecFinData():
 
 extract_obj = sec_filing_docs.SecUrlExtract("ibm")
 p = SecFinData()
-print(p.get_fin_statement(extract_obj.get_filing_data('2014', '10-Q')))
+print(p.get_fin_statement(extract_obj.get_filing_data('1994', '10-Q')))
