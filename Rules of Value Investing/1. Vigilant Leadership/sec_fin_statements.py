@@ -7,7 +7,6 @@ import logging
 from xbrl.cache import HttpCache
 from xbrl.instance import XbrlParser, XbrlInstance
 from datetime import datetime, timedelta
-import html2text
 
 
 # The purpose of this class is to get information from financial statements.
