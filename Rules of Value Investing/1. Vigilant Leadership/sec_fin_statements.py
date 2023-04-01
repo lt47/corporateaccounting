@@ -28,7 +28,7 @@ class SecFinData():
             filing = filings[i]
             xbrl_bool = '/ix?doc=/' in filing['statement_url']
             statement_action = statement_actions.get(
-                xbrl_bool, self.parse_html_txt_statement)
+                xbrl_bool, self.parse_html_statement)
 
             single_response = statement_action(filing)
 
@@ -82,6 +82,9 @@ class SecFinData():
     def parse_txt_statement(self, filing):
         single_statement_response = dict()
         schema_url = filing['statement_url'].replace('gov//', 'gov/')
+        if 'txt' not in schema_url:
+            return self.parse_html_statement(filing)
+
         filing_date = filing['filing_date']
         filing_date = datetime.strptime(filing_date, '%Y-%m-%d')
         # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
@@ -166,37 +169,82 @@ class SecFinData():
 
         return single_statement_response
 
-    def parse_html_txt_statement(self, filing):
+    def parse_html_statement(self, filing):
         single_statement_response = dict()
         schema_url = filing['statement_url'].replace('gov//', 'gov/')
         filing_date = filing['filing_date']
         filing_date = datetime.strptime(filing_date, '%Y-%m-%d')
-        # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
 
+        currency_units = {'thousands': 1000,
+                          'millions': 1000000, 'billions': 1000000000}
+        total_liabilities = ''
+        total_shareholders_equity = ''
+        total_current_assets = ''
+        total_current_liabilities = ''
+        net_income_loss = ''
+
+        # Replace this header information with your own, per SEC policies https://www.sec.gov/os/accessing-edgar-data
         headers = {
             'User-Agent': 'Fort Seven laye@fort-seven.com',
             'Accept-Encoding': 'gzip, deflate',
             'Host': 'www.sec.gov'
         }
         req = requests.get(schema_url, headers=headers).text
-        url_txt = html2text.html2text(req)
+        sec_soup = BeautifulSoup(req, 'lxml')
+        results_table = sec_soup.findAll(
+            'table')
 
-        txt_json = dict()
+        for t in range(len(results_table)):
+            rows = results_table[t].find_all('tr')[1:]
+            for tr in rows:
+                element = tr.find_all('td')
+                if 'dollars in ' in element[0].text.lower():
+                    currency_unit = element[0].text.replace(
+                        '(', '').replace(')', '').replace('\n', '').replace('\n ', '').lower().split(' ')[2]
+                elif len(element) > 2 and 'total liabilities' == element[1].text.strip().replace('\n ', '').lower() and total_liabilities == '':
+                    total_liabilities = element[4].text.replace(
+                        '\n', '').replace('\n ', '')
+                    total_liabilities = f"-{total_liabilities.replace('(','').replace(')','')}" if '(' in total_liabilities else total_liabilities
+                    total_liabilities = int(total_liabilities.replace(
+                        ',', '')) * currency_units[currency_unit]
+                elif 'total liabilities and equity' == element[0].text.strip().replace('\n ', '').lower() and total_shareholders_equity == '':
+                    total_shareholders_equity = element[3].text.replace(
+                        '\n', '').replace('\n ', '')
+                    total_shareholders_equity = f"-{total_shareholders_equity.replace('(','').replace(')','')}" if '(' in total_shareholders_equity else total_shareholders_equity
+                    total_shareholders_equity = int(total_shareholders_equity.replace(
+                        ',', '')) * currency_units[currency_unit]
+                elif len(element) > 2 and 'total current assets' == element[1].text.strip().replace('\n ', '').lower() and total_current_assets == '':
+                    total_current_assets = element[4].text.replace(
+                        '\n', '').replace('\n ', '')
+                    total_current_assets = f"-{total_current_assets.replace('(','').replace(')','')}" if '(' in total_current_assets else total_current_assets
+                    total_current_assets = int(total_current_assets.replace(
+                        ',', '')) * currency_units[currency_unit]
+                elif len(element) > 2 and 'total current liabilities' == element[1].text.strip().replace('\n ', '').lower() and total_current_liabilities == '':
+                    total_current_liabilities = element[4].text.replace(
+                        '\n', '').replace('\n ', '')
+                    total_current_liabilities = f"-{total_current_liabilities.replace('(','').replace(')','')}" if '(' in total_current_liabilities else total_current_liabilities
+                    total_current_liabilities = int(total_current_liabilities.replace(
+                        ',', '')) * currency_units[currency_unit]
+                elif 'net income' == element[0].text.strip().replace('\n ', '').lower() and net_income_loss == '':
+                    net_income_loss = element[3].text.replace(
+                        '\n', '').replace('\n ', '')
+                    net_income_loss = f"-{net_income_loss.replace('(','').replace(')','')}" if '(' in net_income_loss else net_income_loss
+                    net_income_loss = int(net_income_loss.replace(
+                        ',', '')) * currency_units[currency_unit]
 
-        for index, line in enumerate(url_txt.split('\n')):
-            command, description = line.strip().split(
-                None, 1) if len(line.strip().split(None, 1)) > 1 else [None, None]
-            txt_json[command] = description.strip(
-            ) if command != None else None
-
-        out_file = open('./testtxt.json', "w")
-        json.dump(txt_json, out_file, indent=4, sort_keys=False)
-        out_file.close()
-        pass
+        total_shareholders_equity = total_shareholders_equity - total_liabilities
+        debt_to_equity = round(
+            float(total_liabilities/total_shareholders_equity), 2)
+        current_ratio = round(
+            float(total_current_assets/total_current_liabilities), 2)
+        roe = round(
+            float(net_income_loss/total_shareholders_equity), 2)
+        single_statement_response.update(
+            {'totalLiabilities': total_liabilities, 'totalShareholdersEquity': total_shareholders_equity, 'debtToEquity': debt_to_equity, 'totalCurrentAssets': total_current_assets, 'totalCurrentLiabilities': total_current_liabilities, 'currentRatio': current_ratio, 'netIncomeOrLoss': net_income_loss, 'returnOnEquity': roe})
 
         return single_statement_response
 
 
 extract_obj = sec_filing_docs.SecUrlExtract("ibm")
 p = SecFinData()
-print(p.get_fin_statement(extract_obj.get_filing_data('1994', '10-Q')))
+print(p.get_fin_statement(extract_obj.get_filing_data('2014', '10-Q')))
